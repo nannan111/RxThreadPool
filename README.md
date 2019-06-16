@@ -29,3 +29,5 @@
             public void duUi(User o) {//返回主线程
                 Log.i("picooc",o.toString());
             }
+            
+            QQ:450508605    欢迎交流
