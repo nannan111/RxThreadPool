@@ -1,4 +1,4 @@
-# RxCustomizeExecutor
+# RxThreadPool
 自定义类似RxJava和改造的结合体的线程池0.1，可以网络请求，2。开本地线程。使用简单，防止内存泄漏。扩展性比较强，使用了OKhttp3，FASTJSON
  Submit submit=PoolExecutor.create();
         submit.sumitTask(this,true,new YCallable<User>() {
