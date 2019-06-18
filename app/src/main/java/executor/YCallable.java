@@ -4,6 +4,8 @@ import android.os.Handler;
 import android.os.Looper;
 import android.os.Message;
 
+import org.json.JSONException;
+
 import java.util.concurrent.Callable;
 import java.util.concurrent.FutureTask;
 
@@ -12,13 +14,13 @@ import java.util.concurrent.FutureTask;
  */
 
 public abstract class YCallable<T> implements Callable<T> {
-    public FutureTask futureTask;
+    public ComparableFutureTask futureTask;
 
-    public FutureTask getFutureTask() {
+    public ComparableFutureTask getFutureTask() {
         return futureTask;
     }
 
-    public void setFutureTask(FutureTask futureTask) {
+    public void setFutureTask(ComparableFutureTask futureTask) {
         this.futureTask = futureTask;
     }
     private Handler handler=new Handler(Looper.getMainLooper()){
@@ -29,16 +31,20 @@ public abstract class YCallable<T> implements Callable<T> {
             switch (msg.what) {
                 case 1:
                     duUi((T) msg.obj);
+                    if(futureTask!=null&&futureTask.getSubmit()!=null)
+                    futureTask.getSubmit().multitaskStart(futureTask.getPriorityBlockingQueue());
                     break;
                 case 2:
                     error((Exception) msg.obj);
+                    if(futureTask!=null&&futureTask.getSubmit()!=null)
+                        futureTask.getSubmit().multitaskStart(futureTask.getPriorityBlockingQueue());
                     break;
             }
         }
 
     };
 
-    public abstract T run();
+    public abstract T run() throws JSONException;
 
     @Override
     public T call() {

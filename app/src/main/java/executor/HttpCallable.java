@@ -8,7 +8,6 @@ import org.json.JSONException;
 import org.json.JSONObject;
 import java.io.IOException;
 import java.util.concurrent.Callable;
-import java.util.concurrent.FutureTask;
 import okhttp3.Call;
 import okhttp3.Callback;
 import okhttp3.Response;
@@ -16,12 +15,9 @@ import okhttp3.Response;
  * Created by EDZ on 2018/8/20.
  */
 public abstract class HttpCallable<T> implements Callable<T> {
-    private FutureTask futureTask;
-
-
+    private ComparableFutureTask futureTask;
     private YControl yControl;
     private Context mContext;
-
     public Context getmContext() {
         return mContext;
     }
@@ -30,12 +26,12 @@ public abstract class HttpCallable<T> implements Callable<T> {
         this.mContext = mContext;
     }
 
-    public FutureTask getFutureTask() {
+    public ComparableFutureTask getFutureTask() {
         return futureTask;
     }
 
 
-    public void setFutureTask(FutureTask futureTask) {
+    public void setFutureTask(ComparableFutureTask futureTask) {
         this.futureTask = futureTask;
     }
 
@@ -54,9 +50,13 @@ public abstract class HttpCallable<T> implements Callable<T> {
             switch (msg.what) {
                 case 1:
                     duUi((T) msg.obj);
+                    if(futureTask!=null&&futureTask.getSubmit()!=null)
+                    futureTask.getSubmit().multitaskRequestStart(futureTask.getPriorityBlockingQueue());
                     break;
                 case 2://error
                     onError((YError) msg.obj);
+                    if(futureTask!=null&&futureTask.getSubmit()!=null)
+                        futureTask.getSubmit().multitaskRequestStart(futureTask.getPriorityBlockingQueue());
                     break;
             }
         }

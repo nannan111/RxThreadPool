@@ -1,7 +1,9 @@
 package executor;
+
 import android.app.Activity;
 import android.content.Context;
 import android.util.Log;
+
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -25,10 +27,13 @@ public class PoolExecutor implements Submit {
     private volatile PicPausableThreadPoolExecutor PoolExecutor;//线程池对象
     private static PoolExecutor poolExecutor;
     private static ScheduledExecutorService scheduledExecutorService;
-    public static PoolExecutor create(){
-        if(poolExecutor==null){
+    //    private static PriorityBlockingQueue<ComparableFutureTask> waitQueue = new PriorityBlockingQueue<>();
+    private static PriorityBlockingQueue<ComparableFutureTask> waitRequestQueue = new PriorityBlockingQueue<>();
+
+    public static PoolExecutor create() {
+        if (poolExecutor == null) {
             synchronized (PoolExecutor.class) {
-                if(poolExecutor==null)
+                if (poolExecutor == null)
                     poolExecutor = new PoolExecutor();
             }
         }
@@ -36,14 +41,15 @@ public class PoolExecutor implements Submit {
     }
 
     public static ScheduledExecutorService getScheduledExecutorService() {
-        if(scheduledExecutorService==null){
-            synchronized (PoolExecutor.class){
-                if(scheduledExecutorService==null)
+        if (scheduledExecutorService == null) {
+            synchronized (PoolExecutor.class) {
+                if (scheduledExecutorService == null)
                     scheduledExecutorService = Executors.newScheduledThreadPool(3);
             }
         }
         return scheduledExecutorService;
     }
+
     /**
      * @param corePoolSize    核心线程数的大小
      * @param maximumPoolSize 最大线程数量
@@ -54,6 +60,7 @@ public class PoolExecutor implements Submit {
      */
     public PoolExecutor(int corePoolSize, int maximumPoolSize, long keepAliveTime, TimeUnit unit, PriorityBlockingQueue<Runnable> workQueue) {
         PoolExecutor = new PicPausableThreadPoolExecutor(corePoolSize, maximumPoolSize, keepAliveTime, unit, workQueue);
+        workQueue.poll();
     }
 
     /**
@@ -68,11 +75,13 @@ public class PoolExecutor implements Submit {
      *
      * @return
      */
-    public  PicPausableThreadPoolExecutor getPoolExecutor() {
+    public PicPausableThreadPoolExecutor getPoolExecutor() {
         return PoolExecutor != null ? PoolExecutor : new PicPausableThreadPoolExecutor(corePoolSize, maximumPoolSize, keepAliveTime, unit, workQueue);
     }
 
     private static volatile Map<String, List<ComparableFutureTask>> futureMap = new HashMap<>();
+
+    private static volatile Map<String, PriorityBlockingQueue<ComparableFutureTask>> priorityBlockingQueueHashMap = new HashMap<>();
 
     private synchronized void addFutureMap(String act, ComparableFutureTask comparableFutureTask) {
         if (futureMap.get(act.toString()) == null) {
@@ -97,8 +106,7 @@ public class PoolExecutor implements Submit {
     /**
      * 关闭任务
      *
-     * @param  /**
-     *            那么cancel是如何工作的呢？
+     * @param /** 那么cancel是如何工作的呢？
      *            <p>
      *            当你想要取消你已提交给执行者的任务，使用Future接口的cancel()方法。
      *            根据cancel()方法参数和任务的状态不同，这个方法的行为将不同：
@@ -123,51 +131,127 @@ public class PoolExecutor implements Submit {
                         }
                     }
                 }
+
             futureList.clear();
         }
 
     }
 
-    @Override
-    public void sumitTask(Activity act, boolean isShutDownTask, YCallable runnable) {
+    private void sumitOneTask(Context act, boolean isShutDownTask, YCallable runnable) {
         if (PoolExecutor == null) {
             PoolExecutor = getPoolExecutor();
         }
         try {
             ComparableFutureTask futureTask = new ComparableFutureTask<>(runnable);
             futureTask.setShutDownTask(isShutDownTask);
-            addFutureMap(act.toString(), futureTask);
+            if (act instanceof Activity) {
+                addFutureMap(act.toString(), futureTask);
+            }
             PoolExecutor.execute(futureTask);
         } catch (Exception e) {
             Log.i("yangzhinan", e.toString());
         }
     }
 
+    /**
+     * 添加任务
+     *
+     * @param act
+     * @param isShutDownTask
+     * @param runnables
+     */
+    @Override
+    public void sumitTask(Context act, boolean isShutDownTask, YCallable... runnables) {
+        if (runnables.length == 1) {
+            for (YCallable runnable : runnables) {
+                sumitOneTask(act, isShutDownTask, runnable);
+            }
+        } else {
+            PriorityBlockingQueue<ComparableFutureTask> waitQueue = new PriorityBlockingQueue<>();
+            for (YCallable runnable : runnables) {
+                ComparableFutureTask futureTask = new ComparableFutureTask<>(runnable);
+                futureTask.setShutDownTask(isShutDownTask);
+                futureTask.setSubmit(this);
+                futureTask.setPriorityBlockingQueue(waitQueue);
+                if (act instanceof Activity) {
+                    addFutureMap(act.toString(), futureTask);
+                }
+                waitQueue.put(futureTask);
+            }
+            multitaskStart(waitQueue);
+        }
+    }
+
+
+    public void multitaskStart(PriorityBlockingQueue<ComparableFutureTask> waitQueue) {
+        if (PoolExecutor == null) {
+            PoolExecutor = getPoolExecutor();
+        }
+        if (waitQueue == null) return;
+        if (waitQueue != null && waitQueue.size() > 0) {
+            ComparableFutureTask futureTask = waitQueue.poll();
+            PoolExecutor.execute(futureTask);
+        }
+    }
 
     @Override
-    public void request(Context context, YControl yControl, HttpCallable runnable) {
+    public void request(YControl yControl, HttpCallable runnable) {
         if (PoolExecutor == null) {
             PoolExecutor = getPoolExecutor();
         }
         try {
             Log.i("999888888", "---ComparableFutureTask");
 //            Looper.prepare();
-            if(!ExecutorTools.isNetworkConnected(context)||context==null){
+            if (!ExecutorTools.isNetworkConnected(yControl.getmContext()) || yControl.getmContext() == null) {
                 runnable.onError(new YError(new Exception("网络错误")));
                 return;
             }
-            ComparableFutureTask futureTask = new ComparableFutureTask<>(runnable, yControl, context);
+            ComparableFutureTask futureTask = new ComparableFutureTask<>(runnable, yControl);
             futureTask.setShutDownTask(yControl.isShutDownTask());
-            if (context instanceof Activity) {
-                addFutureMap(context.toString(), futureTask);
+            if (yControl.getmContext() instanceof Activity) {
+                addFutureMap(yControl.getmContext().toString(), futureTask);
             }
-            if(yControl.getDelay()<=0){//看看该任务需要delay吗
+            if (yControl.getDelay() <= 0) {//看看该任务需要delay吗
                 PoolExecutor.execute(futureTask);
-            }else {
+            } else {
                 getScheduledExecutorService().schedule(futureTask, yControl.getDelay(), TimeUnit.MILLISECONDS);
             }
         } catch (Exception e) {
             Log.i("yangzhinan", e.toString());
         }
+    }
+    @Override
+    public void multitaskRequestStart(PriorityBlockingQueue<ComparableFutureTask> waitQueue) {
+        if (PoolExecutor == null) {
+            PoolExecutor = getPoolExecutor();
+        }
+        if (waitQueue != null && waitQueue.size() > 0) {
+            ComparableFutureTask futureTask = waitQueue.poll();
+            if (!ExecutorTools.isNetworkConnected(futureTask.getyControl().getmContext()) || futureTask.getyControl().getmContext() == null) {
+                futureTask.getCallable().onError(new YError(new Exception("网络错误")));
+            }
+            if (futureTask.getyControl().getDelay() <= 0) {//看看该任务需要delay吗
+                PoolExecutor.execute(futureTask);
+            } else {
+                getScheduledExecutorService().schedule(futureTask, futureTask.getyControl().getDelay(), TimeUnit.MILLISECONDS);
+            }
+        }
+    }
+
+    @Override
+    public  void initRequest(RequestArray ... requestArrays){
+        PriorityBlockingQueue<ComparableFutureTask> waitRequestQueue = new PriorityBlockingQueue<>();
+        for (RequestArray requestArray:requestArrays){
+            YControl yControl = requestArray.getyControl();
+            ComparableFutureTask futureTask = new ComparableFutureTask<>(requestArray.getRunnable(), yControl);
+            futureTask.setShutDownTask(yControl.isShutDownTask());
+            futureTask.setSubmit(this);
+            futureTask.setPriorityBlockingQueue(waitRequestQueue);
+            if (yControl.getmContext() instanceof Activity) {
+                addFutureMap(yControl.getmContext().toString(), futureTask);
+            }
+            waitRequestQueue.put(futureTask);
+        }
+        multitaskRequestStart(waitRequestQueue);
     }
 }
